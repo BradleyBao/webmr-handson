@@ -20,7 +20,143 @@
     }
     #hud a { color: #7cf; }
     #status { color: #fd6; }
+    #model-info {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+      max-height: 30vh; overflow-y: auto;
+      background: rgba(0, 0, 0, 0.78); color: #6f6;
+      font: 13px/1.5 monospace; padding: 8px 12px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom));
+      white-space: pre-wrap;
+    }
+    #model-info.error { color: #f77; }
   </style>
+
+  <script>
+    /* fit-model
+     *
+     * Makes ANY .glb work without you having to know anything about it first.
+     *
+     * Two things differ wildly between models, and both break a hard-coded setup:
+     *
+     *   - SIZE. Models come in whatever units their author used. The Khronos fox
+     *     is 155 units long; a Quaternius character is 1.8. A scale that suits
+     *     one makes the other either microscopic or the size of a building. So
+     *     instead of a raw scale factor, you say how big you want it to end up,
+     *     in MARKER WIDTHS, and this measures the model and works out the rest.
+     *
+     *   - CLIP NAMES. One model calls its animation "Run", another calls the
+     *     same thing "CharacterArmature|Run". So a clip is matched loosely: the
+     *     part after the "|" is enough.
+     *
+     * Whatever the model turns out to contain is printed at the bottom of the
+     * screen. You are on a phone; you have no console. If a name does not match,
+     * this says so instead of silently doing nothing.
+     */
+    AFRAME.registerComponent('fit-model', {
+      schema: {
+        size: { type: 'number', default: 0.6 },  // biggest dimension, in marker widths
+        clip: { type: 'string', default: '' }    // empty = play the first animation
+      },
+
+      init: function () {
+        this.info = document.querySelector('#model-info');
+        this.el.addEventListener('model-loaded', (e) => this.onLoad(e.detail.model));
+        this.el.addEventListener('model-error', () => {
+          this.report('could not load the model.\ncheck the file name and that it is really in assets/', true);
+        });
+      },
+
+      report: function (text, isError) {
+        this.info.textContent = text;
+        this.info.classList.toggle('error', !!isError);
+      },
+
+      // Size of the model in its OWN units, walking only LOCAL matrices.
+      //
+      // Not world matrices. Until the marker has actually been seen, the anchor
+      // above us has a degenerate transform, so anything derived from
+      // matrixWorld either comes out zero or divides by it -- and the model
+      // finishes downloading at an unpredictable moment relative to the first
+      // sighting. Local matrices are true from the instant the model exists.
+      measure: function (model) {
+        const box = new THREE.Box3();
+        const part = new THREE.Box3();
+
+        const walk = (obj, parentMatrix) => {
+          obj.updateMatrix();
+          const matrix = new THREE.Matrix4().multiplyMatrices(parentMatrix, obj.matrix);
+          if (obj.geometry) {
+            if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+            part.copy(obj.geometry.boundingBox).applyMatrix4(matrix);
+            box.union(part);
+          }
+          obj.children.forEach((child) => walk(child, matrix));
+        };
+        walk(model, new THREE.Matrix4());
+
+        return box;
+      },
+
+      onLoad: function (model) {
+        const box = this.measure(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const biggest = Math.max(size.x, size.y, size.z);
+        if (!(biggest > 0)) {
+          this.report('the model loaded but has no size. is it empty?', true);
+          return;
+        }
+
+        const factor = this.data.size / biggest;
+        this.el.object3D.scale.setScalar(factor);
+
+        // Centre it on the marker and stand it on the surface rather than
+        // half-sinking into it.
+        const centre = new THREE.Vector3();
+        box.getCenter(centre);
+        model.position.x -= centre.x;
+        model.position.z -= centre.z;
+        model.position.y -= box.min.y;
+
+        const names = model.animations.map((a) => a.name);
+        const lines = [
+          'model is ' + biggest.toFixed(2) + ' units across -> scaled by ' + factor.toFixed(4),
+          'to be ' + this.data.size + ' marker widths.',
+          ''
+        ];
+
+        if (!names.length) {
+          this.report(lines.join('\n') + 'this model has NO animations. it will just stand there.');
+          return;
+        }
+
+        // "Run" should find "CharacterArmature|Run".
+        const wanted = this.data.clip.trim();
+        const match = !wanted
+          ? names[0]
+          : names.find((n) => n === wanted) ||
+            names.find((n) => n.split('|').pop() === wanted) ||
+            names.find((n) => n.toLowerCase().includes(wanted.toLowerCase()));
+
+        if (!match) {
+          this.report(
+            lines.join('\n') +
+            'NO CLIP called "' + wanted + '" in this model.\n\navailable clips:\n  ' +
+            names.join('\n  '),
+            true
+          );
+          return;
+        }
+
+        this.el.setAttribute('animation-mixer', { clip: match });
+        this.report(
+          lines.join('\n') +
+          'playing: ' + match + '\n\nall ' + names.length + ' clips in this model:\n  ' +
+          names.join('\n  ')
+        );
+      }
+    });
+  </script>
 </head>
 <body>
 
@@ -28,6 +164,7 @@
     <b>Stage 2: 3D Model</b> &mdash; point your camera at Marker A<br />
     <span id="status">Looking for the marker&hellip;</span> &middot; <a href="./index.html">Back to hub</a>
   </div>
+  <div id="model-info">loading the model&hellip;</div>
 
   <a-scene
     mindar-image="imageTargetSrc: ./assets/targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;"
@@ -36,15 +173,6 @@
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-assets timeout="15000">
-      <!-- Khronos sample model. It ships exactly three animation clips:
-           Survey, Walk, Run. -->
-      <a-asset-item
-        id="foxModel"
-        src="https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/Fox/glTF-Binary/Fox.glb">
-      </a-asset-item>
-    </a-assets>
-
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <a-light type="ambient" intensity="0.8"></a-light>
@@ -52,28 +180,39 @@
 
     <a-entity mindar-image-target="targetIndex: 0">
 
-      <!-- The fox is about 79 units tall in model space, and here the marker
-           width is 1, so scale 0.005 makes it roughly 0.4 marker-widths tall.
-           rotation="90 0 0" turns the model's up axis (+Y) to face along the
-           marker's normal (+Z), so the fox stands ON the marker rather than
-           lying flat in its plane. -->
-      <a-entity
-        id="fox"
-        gltf-model="./assets/Adventurer.glb"
-        position="0 0 0"
-        rotation="90 0 0"
-        scale="0.005 0.005 0.005"
-        animation-mixer="clip: Run">
+      <!-- The marker's surface is the XY plane and +Z sticks out of it, but a
+           model's "up" is +Y. This wrapper turns the model to stand ON the
+           marker instead of lying flat in it. -->
+      <a-entity rotation="90 0 0">
+
+        <!-- ==== TASK 1: bring your own model ====
+             Find a model at https://poly.pizza (search anything, it is free).
+             Download the .glb, then in YOUR fork on GitHub:
+                Add file -> Upload files -> drop it into the assets/ folder
+             Then put its file name below. Nothing else needs to change:
+             the size is worked out for you, whatever units the model uses.
+        -->
+        <a-entity
+          gltf-model="./assets/Adventurer.glb"
+          fit-model="size: 0.6; clip: Run">
+        </a-entity>
+
+        <!-- ==== TASK 2 ====
+             The bottom of the screen lists every animation this model has.
+             Pick a different one and put it in clip: above.
+             Many models have none at all -- it will say so.
+
+             ==== TASK 3 ====
+             size: is in MARKER WIDTHS. 1.0 is exactly as wide as the marker.
+             Try 0.2 and 2.0. Why is this a better thing to specify than a
+             raw scale factor like 0.005?
+
+             ==== TASK 4 ====
+             Delete rotation="90 0 0" from the wrapper above. Where does the
+             model go, and why?
+        -->
+
       </a-entity>
-
-      <!-- ==== TASKS ====
-           1. Change clip to Survey or Walk. Those three names are the only
-              ones this model has: a name it does not have plays nothing.
-              (Open the browser console: the clip list is printed there.)
-           2. Try scale 0.01, then 0.002. What does scale mean here?
-           3. Set rotation back to "0 0 0". Where does the fox go, and why?
-      -->
-
     </a-entity>
   </a-scene>
 
@@ -82,11 +221,6 @@
     const target = document.querySelector('[mindar-image-target]');
     target.addEventListener('targetFound', () => { status.textContent = '✅ Tracking Marker A'; });
     target.addEventListener('targetLost', () => { status.textContent = '❌ Lost the marker'; });
-
-    // Print the clip names, so Task 1 is not a guessing game.
-    document.getElementById('fox').addEventListener('model-loaded', (e) => {
-      console.log('[stage2] clips in this model:', e.detail.model.animations.map((a) => a.name));
-    });
   </script>
 </body>
 </html>

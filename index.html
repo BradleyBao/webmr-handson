@@ -63,10 +63,26 @@
     <a href="./stage1.html">Stage 1 &middot; Primitives
       <small>Put a box on Marker A. Change its colour, size, position, spin.</small></a>
     <a href="./stage2.html">Stage 2 &middot; 3D model
-      <small>Swap the box for an animated 3D fox. Change which animation plays.</small></a>
+      <small>Put an animated 3D model on the marker &mdash; bring your own.</small></a>
     <a href="./stage3.html">Stage 3 &middot; Two markers
       <small>Track A and B at once. Make them react when they get close.</small></a>
   </div>
+
+  <h2>Bring your own 3D model</h2>
+  <p>Stage 2 will show any model you give it. Free ones, no account needed:</p>
+  <ul>
+    <li><a href="https://poly.pizza">poly.pizza</a> &mdash; search for anything, press
+      Download. Mostly still models, no animation.</li>
+    <li><a href="https://quaternius.com">quaternius.com</a> &mdash; animated characters
+      and creatures, in packs.</li>
+    <li><a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models">Khronos
+      sample models</a> &mdash; the reference set, several are animated.</li>
+  </ul>
+  <p>You want a <code>.glb</code> file. To install it: in <b>your fork</b> on GitHub, open
+    the <code>assets</code> folder, then <b>Add file → Upload files</b>, drop the
+    <code>.glb</code> in, and commit. Then put its file name into
+    <code>stage2.html</code>. Nothing else needs changing &mdash; the page measures the
+    model and sizes it for you, whatever units its author used.</p>
 
   <h2>How to change the code</h2>
   <ol>
